@@ -8,12 +8,19 @@ class MetricCard extends StatelessWidget {
   final IconData icon;
   final Color accentColor;
 
+  final String? status;
+  final Color? statusColor;
+  final String? subtitle;
+
   const MetricCard({
     super.key,
     required this.title,
     required this.value,
     required this.icon,
     required this.accentColor,
+    this.status,
+    this.statusColor,
+    this.subtitle,
   });
 
   @override
@@ -54,13 +61,54 @@ class MetricCard extends StatelessWidget {
                       ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textMain,
+                Row(
+                  children: [
+                    Text(
+                      value,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textMain,
+                            fontSize: 18,
+                          ),
+                    ),
+                    if (status != null) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: (statusColor ?? accentColor)
+                              .withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: (statusColor ?? accentColor)
+                                .withValues(alpha: 0.3),
+                            width: 0.5,
+                          ),
+                        ),
+                        child: Text(
+                          status!,
+                          style: TextStyle(
+                            color: statusColor ?? accentColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
+                    ],
+                  ],
                 ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    subtitle!,
+                    style: TextStyle(
+                      color: AppColors.textSecondary.withValues(alpha: 0.8),
+                      fontSize: 10,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 
 import '../core/theme/theme.dart';
 import '../providers/history_provider.dart';
@@ -12,8 +13,9 @@ import '../services/pdf_service.dart';
 import '../utils/image_utils.dart';
 import '../widgets/chart_widget.dart';
 import '../widgets/metric_card.dart';
+import '../widgets/histogram_chart.dart';
 
-class ResultScreen extends StatelessWidget {
+class ResultScreen extends StatefulWidget {
   final ImageMetricsResult metrics;
   final String originalImagePath;
   final ImageOutputFormat format;
@@ -25,11 +27,20 @@ class ResultScreen extends StatelessWidget {
     required this.format,
   });
 
-  // ── Helper formatters ──
+  @override
+  State<ResultScreen> createState() => _ResultScreenState();
+}
+
+class _ResultScreenState extends State<ResultScreen> {
+  double _sliderValue = 0.5;
+  String _selectedChannel = 'r';
 
   String get _ratioText {
-    if (metrics.originalSize <= 0 || metrics.compressedSize <= 0) return '0 : 1';
-    return '${(metrics.originalSize / metrics.compressedSize).toStringAsFixed(2)} : 1';
+    if (widget.metrics.originalSize <= 0 ||
+        widget.metrics.compressedSize <= 0) {
+      return '0 : 1';
+    }
+    return '${(widget.metrics.originalSize / widget.metrics.compressedSize).toStringAsFixed(2)} : 1';
   }
 
   String _formatBytes(int bytes) {
@@ -43,20 +54,62 @@ class ResultScreen extends StatelessWidget {
   }
 
   double get _reductionPct {
-    if (metrics.originalSize <= 0) return 0;
-    return (1 - metrics.compressedSize / metrics.originalSize) * 100;
+    if (widget.metrics.originalSize <= 0) return 0;
+    return (1 - widget.metrics.compressedSize / widget.metrics.originalSize) *
+        100;
   }
 
-  // ── Share: kirim teks hasil analisis ──
-  Future<void> _onShare(BuildContext context) async {
-    final String text = '''
+  Map<String, dynamic> get _psnrStatus {
+    final double val = widget.metrics.psnr;
+    if (val >= 35) {
+      return {'label': 'Excellent', 'color': Colors.green};
+    } else if (val >= 30) {
+      return {'label': 'High Quality', 'color': Colors.green};
+    } else if (val >= 25) {
+      return {'label': 'Fair', 'color': Colors.orange};
+    } else {
+      return {'label': 'Low Quality', 'color': Colors.red};
+    }
+  }
+
+  Color get _currentChannelColor {
+    switch (_selectedChannel) {
+      case 'r':
+        return Colors.red;
+      case 'g':
+        return Colors.green;
+      case 'b':
+        return Colors.blue;
+      default:
+        return AppColors.primary;
+    }
+  }
+
+  String get _currentChannelLabel {
+    switch (_selectedChannel) {
+      case 'r':
+        return 'Merah';
+      case 'g':
+        return 'Hijau';
+      case 'b':
+        return 'Biru';
+      default:
+        return 'Intensitas';
+    }
+  }
+
+  Future<void> _onShare() async {
+    if (!mounted) return;
+    final String text =
+        '''
 📊 Hasil Analisis Kompresi Citra
 ================================
-PSNR          : ${metrics.psnr.toStringAsFixed(2)} dB
-MSE           : ${metrics.mse.toStringAsFixed(6)}
+PSNR          : ${widget.metrics.psnr.toStringAsFixed(2)} dB
+MSE           : ${widget.metrics.mse.toStringAsFixed(6)}
+SSIM          : ${widget.metrics.ssim.toStringAsFixed(4)}
 Rasio Kompresi: $_ratioText
-Ukuran Asli   : ${_formatBytes(metrics.originalSize)}
-Ukuran Sesudah: ${_formatBytes(metrics.compressedSize)}
+Ukuran Asli   : ${_formatBytes(widget.metrics.originalSize)}
+Ukuran Sesudah: ${_formatBytes(widget.metrics.compressedSize)}
 Pengurangan   : ${_reductionPct.toStringAsFixed(1)}%
 ================================
 Dibagikan dari Aplikasi Kompresi Citra Digital
@@ -68,320 +121,330 @@ Dibagikan dari Aplikasi Kompresi Citra Digital
       );
     } catch (e, st) {
       debugPrint('ResultScreen – share error: $e\n$st');
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Gagal membagikan: $e')),
-        );
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Gagal membagikan: $e')));
       }
     }
   }
 
-  // ── Simpan laporan PDF ──
-  Future<void> _onSaveReport(BuildContext context) async {
-    // Simpan gambar terkompresi ke galeri + riwayat
-    final scaffoldMessenger = ScaffoldMessenger.of(context);
-    final navigator = Navigator.of(context);
-    final historyProvider = context.read<HistoryProvider>();
+  Future<void> _onSaveReport() async {
+    bool success = false;
+    while (!success && mounted) {
+      if (!mounted) return;
+      try {
+        final historyProvider = context.read<HistoryProvider>();
 
-    try {
-      // 1. Simpan ke galeri
-      final fileExists = File(metrics.compressedImagePath).existsSync();
-      bool savedToGallery = false;
-      if (fileExists) {
-        final bytes = await File(metrics.compressedImagePath).readAsBytes();
-        savedToGallery = await GalleryService.saveImageToGallery(bytes);
-      }
+        final fileExists = File(
+          widget.metrics.compressedImagePath,
+        ).existsSync();
+        if (fileExists) {
+          final bytes = await File(
+            widget.metrics.compressedImagePath,
+          ).readAsBytes();
+          await GalleryService.saveImageToGallery(bytes);
+        }
 
-      // 2. Tambah ke riwayat
-      await historyProvider.addFromMetrics(
-        metrics: metrics,
-        originalPath: originalImagePath,
-        format: format.name.toUpperCase(),
-      );
+        if (!mounted) return;
+        await historyProvider.addFromMetrics(
+          metrics: widget.metrics,
+          originalPath: widget.originalImagePath,
+          format: widget.format.name.toUpperCase(),
+        );
 
-      // 3. Generate PDF laporan
-      final String pdfPath = await PdfService.generateReport(
-        metrics: metrics,
-        originalImagePath: originalImagePath,
-      );
+        if (!mounted) return;
+        final String pdfPath = await PdfService.generateReport(
+          metrics: widget.metrics,
+          originalImagePath: widget.originalImagePath,
+        );
 
-      // 4. Beri tahu user dan tawarkan untuk membuka/berbagi PDF
-      if (!context.mounted) return;
+        success = true;
+        if (!mounted) return;
 
-      final bool? openPdf = await showDialog<bool>(
-        context: context,
-        builder: (_) => AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppTheme.borderRadius),
-          ),
-          title: const Row(
-            children: [
-              Icon(Icons.check_circle_rounded, color: AppTheme.success, size: 24),
-              SizedBox(width: 10),
-              Text('Laporan Tersimpan'),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (savedToGallery)
-                const Text('✓ Gambar tersimpan ke galeri')
-              else
-                const Text('⚠ Gagal menyimpan ke galeri'),
-              const SizedBox(height: 4),
-              const Text('✓ Riwayat tersimpan'),
-              const SizedBox(height: 4),
-              const Text('✓ Laporan PDF dibuat'),
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: AppTheme.contentCard,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  pdfPath.split('/').last,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontFamily: 'monospace',
-                    color: AppColors.textSecondary,
-                  ),
-                ),
+        final bool? openPdf = await showDialog<bool>(
+          context: context,
+          builder: (_) => AlertDialog(
+            title: const Text('Laporan Tersimpan'),
+            content: const Text('Laporan PDF telah berhasil digenerate.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Tutup'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Bagikan PDF'),
               ),
             ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Tutup'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () => Navigator.pop(context, true),
-              icon: const Icon(Icons.share_outlined, size: 18),
-              label: const Text('Bagikan PDF'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-
-      // 5. Jika user ingin bagikan PDF
-      if (openPdf == true) {
-        await SharePlus.instance.share(
-          ShareParams(
-            files: [XFile(pdfPath)],
-            subject: 'Laporan Analisis Kompresi Citra',
-            text: 'Laporan PDF Analisis Kompresi Citra Digital',
           ),
         );
-      }
 
-      navigator.popUntil((route) => route.isFirst);
-    } catch (e, st) {
-      debugPrint('ResultScreen – save report error: $e\n$st');
-      scaffoldMessenger.showSnackBar(
-        SnackBar(content: Text('Gagal menyimpan laporan: $e')),
-      );
+        if (openPdf == true) {
+          if (!mounted) return;
+          await SharePlus.instance.share(
+            ShareParams(
+              files: [XFile(pdfPath)],
+              subject: 'Laporan Analisis Kompresi Citra',
+            ),
+          );
+        }
+
+        if (mounted) {
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
+      } catch (e) {
+        debugPrint('ResultScreen – save report error: $e');
+        if (!mounted) return;
+
+        final bool? retry = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Gagal Menyimpan'),
+            content: Text(
+              'Terjadi kesalahan saat menyimpan laporan: $e\n\nApakah Anda ingin mencoba lagi?',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Batal'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Coba Lagi'),
+              ),
+            ],
+          ),
+        );
+
+        if (retry != true) break;
+      }
     }
   }
 
   @override
+  void dispose() {
+    debugPrint('ResultScreen – evicting images from cache');
+    FileImage(File(widget.originalImagePath)).evict();
+    FileImage(File(widget.metrics.compressedImagePath)).evict();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // Buat spots PSNR berdasarkan kualitas berbeda (simulasi tren)
-    final double psnr = metrics.psnr;
-    final List<FlSpot> psnrSpots = _buildPsnrSpots(psnr);
+    final List<FlSpot> psnrSpots = _buildPsnrSpots(widget.metrics.psnr);
 
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
-        elevation: 0,
-        title: const Text(
-          'Hasil Analisis',
-          style: TextStyle(fontWeight: FontWeight.w700),
-        ),
+        title: const Text('Hasil Analisis'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 20),
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Perbandingan Citra ──
-            _SectionHeader(title: 'Perbandingan Citra'),
-            const SizedBox(height: 12),
-            Container(
-              decoration: BoxDecoration(
-                color: AppColors.card,
-                borderRadius: BorderRadius.circular(AppTheme.borderRadius),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
+      body: AnimationLimiter(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: AnimationConfiguration.toStaggeredList(
+              duration: const Duration(milliseconds: 500),
+              childAnimationBuilder: (w) => SlideAnimation(
+                verticalOffset: 20,
+                child: FadeInAnimation(child: w),
               ),
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: _ImagePreview(
-                      imagePath: originalImagePath,
-                      label: 'Asli',
-                      sublabel: _formatBytes(metrics.originalSize),
-                      badgeColor: AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _ImagePreview(
-                      imagePath: metrics.compressedImagePath,
-                      label: 'Kompresi',
-                      sublabel: _formatBytes(metrics.compressedSize),
-                      badgeColor: AppTheme.brandSecond,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // ── Metrik Kualitas ──
-            _SectionHeader(title: 'Metrik Kualitas'),
-            const SizedBox(height: 12),
-            Row(
               children: [
-                Expanded(
-                  child: MetricCard(
-                    title: 'PSNR VALUE',
-                    value: '${metrics.psnr.toStringAsFixed(2)} dB',
-                    icon: Icons.show_chart_rounded,
-                    accentColor: AppColors.primary,
-                  ),
+                const _SectionHeader(title: 'Perbandingan Visual'),
+                const SizedBox(height: 12),
+                _ComparisonSlider(
+                  originalPath: widget.originalImagePath,
+                  compressedPath: widget.metrics.compressedImagePath,
+                  value: _sliderValue,
+                  onChanged: (val) => setState(() => _sliderValue = val),
+                  originalSize: _formatBytes(widget.metrics.originalSize),
+                  compressedSize: _formatBytes(widget.metrics.compressedSize),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: MetricCard(
-                    title: 'MSE VALUE',
-                    value: metrics.mse.toStringAsFixed(4),
-                    icon: Icons.analytics_outlined,
-                    accentColor: AppColors.secondary,
-                  ),
+                const SizedBox(height: 24),
+                const _SectionHeader(title: 'Metrik Kualitas Citra'),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: MetricCard(
+                        title: 'PSNR VALUE',
+                        value: '${widget.metrics.psnr.toStringAsFixed(2)} dB',
+                        icon: Icons.show_chart_rounded,
+                        accentColor: AppColors.primary,
+                        status: _psnrStatus['label'],
+                        statusColor: _psnrStatus['color'],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: MetricCard(
+                        title: 'SSIM INDEX',
+                        value: widget.metrics.ssim.toStringAsFixed(4),
+                        icon: Icons.auto_graph_rounded,
+                        accentColor: Colors.deepPurple,
+                        status: widget.metrics.ssim > 0.9
+                            ? 'Identik'
+                            : 'Berbeda',
+                        subtitle:
+                            'Mendekati 1 berarti struktur sangat identik.',
+                      ),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: MetricCard(
+                        title: 'MSE VALUE',
+                        value: widget.metrics.mse.toStringAsFixed(4),
+                        icon: Icons.analytics_outlined,
+                        accentColor: AppColors.secondary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: MetricCard(
+                        title: 'RASIO KOMPRESI',
+                        value: _ratioText,
+                        icon: Icons.compress_rounded,
+                        accentColor: AppColors.primary,
+                        status: '${_reductionPct.toStringAsFixed(1)}%',
+                        statusColor: AppTheme.success,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                const _SectionHeader(
+                  title: 'Analisis Distribusi Citra (Histogram)',
+                ),
+                const SizedBox(height: 12),
+                _buildChannelSelector(),
+                const SizedBox(height: 12),
+                HistogramChartWidget(
+                  original: widget.metrics.originalHistogram[_selectedChannel]!,
+                  compressed:
+                      widget.metrics.compressedHistogram[_selectedChannel]!,
+                  channelColor: _currentChannelColor,
+                  channelLabel: _currentChannelLabel,
+                ),
+                const SizedBox(height: 24),
+                const _SectionHeader(title: 'Optimasi Ukuran'),
+                const SizedBox(height: 12),
+                BarChartWidget(
+                  beforeSize: widget.metrics.originalSize / 1024,
+                  afterSize: widget.metrics.compressedSize / 1024,
+                  beforeLabel: 'Asli',
+                  afterLabel: 'Kompresi',
+                ),
+                const SizedBox(height: 24),
+                const _SectionHeader(title: 'Estimasi Kualitas vs Kompresi'),
+                const SizedBox(height: 12),
+                LineChartWidget(spots: psnrSpots),
+                const SizedBox(height: 32),
               ],
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: MetricCard(
-                    title: 'RASIO KOMPRESI',
-                    value: _ratioText,
-                    icon: Icons.compress_rounded,
-                    accentColor: AppColors.primary,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: MetricCard(
-                    title: 'PENGURANGAN',
-                    value: '${_reductionPct.toStringAsFixed(1)}%',
-                    icon: Icons.trending_down_rounded,
-                    accentColor: AppTheme.success,
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // ── Visualisasi ──
-            _SectionHeader(title: 'Visualisasi Perbandingan'),
-            const SizedBox(height: 12),
-            BarChartWidget(
-              beforeSize: metrics.originalSize / 1024,
-              afterSize: metrics.compressedSize / 1024,
-              beforeLabel: 'Sebelum',
-              afterLabel: 'Sesudah',
-            ),
-            const SizedBox(height: 16),
-            LineChartWidget(spots: psnrSpots),
-
-            const SizedBox(height: 32),
-          ],
+          ),
         ),
       ),
+      bottomNavigationBar: _buildBottomBar(context),
+    );
+  }
 
-      // ── Tombol Bawah ──
-      bottomNavigationBar: Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-        decoration: BoxDecoration(
-          color: AppColors.card,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.07),
-              blurRadius: 12,
-              offset: const Offset(0, -4),
+  Widget _buildChannelSelector() {
+    return Row(
+      children: [
+        _buildChannelChip('r', 'Red', Colors.red),
+        const SizedBox(width: 8),
+        _buildChannelChip('g', 'Green', Colors.green),
+        const SizedBox(width: 8),
+        _buildChannelChip('b', 'Blue', Colors.blue),
+      ],
+    );
+  }
+
+  Widget _buildChannelChip(String channel, String label, Color color) {
+    final bool selected = _selectedChannel == channel;
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (val) {
+        if (val) setState(() => _selectedChannel = channel);
+      },
+      selectedColor: color.withValues(alpha: 0.15),
+      labelStyle: TextStyle(
+        color: selected ? color : AppColors.textSecondary,
+        fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+        fontSize: 12,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: selected ? color : Colors.transparent),
+      ),
+      showCheckmark: false,
+    );
+  }
+
+  Widget _buildBottomBar(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.07),
+            blurRadius: 12,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _onShare,
+                icon: const Icon(Icons.share_outlined, size: 20),
+                label: const Text('Bagikan'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.primary, width: 1.5),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _onSaveReport,
+                icon: const Icon(Icons.save_alt_rounded, size: 20),
+                label: const Text('Simpan Laporan'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
             ),
           ],
-        ),
-        child: SafeArea(
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: () => _onShare(context),
-                  icon: const Icon(Icons.share_outlined, size: 20),
-                  label: const Text('Bagikan'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primary,
-                    side: const BorderSide(color: AppColors.primary, width: 1.5),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () => _onSaveReport(context),
-                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 20),
-                  label: const Text('Simpan Laporan'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    elevation: 2,
-                  ),
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );
   }
 
-  /// Build spots PSNR simulasi tren mulai kualitas rendah→tinggi
   List<FlSpot> _buildPsnrSpots(double actualPsnr) {
-    // Asumsi: titik terakhir (kualitas 100%) ≈ PSNR aktual dikali sedikit
     final double p100 = actualPsnr;
     return [
       FlSpot(10, (p100 * 0.55).clamp(5, 60)),
@@ -392,8 +455,6 @@ Dibagikan dari Aplikasi Kompresi Citra Digital
     ];
   }
 }
-
-// ── Sub-widgets ──
 
 class _SectionHeader extends StatelessWidget {
   final String title;
@@ -415,80 +476,153 @@ class _SectionHeader extends StatelessWidget {
         Text(
           title,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-                color: AppColors.textMain,
-              ),
+            fontWeight: FontWeight.w700,
+            color: AppColors.textMain,
+          ),
         ),
       ],
     );
   }
 }
 
-class _ImagePreview extends StatelessWidget {
-  final String imagePath;
-  final String label;
-  final String sublabel;
-  final Color badgeColor;
+class _ComparisonSlider extends StatelessWidget {
+  final String originalPath;
+  final String compressedPath;
+  final double value;
+  final ValueChanged<double> onChanged;
+  final String originalSize;
+  final String compressedSize;
 
-  const _ImagePreview({
-    required this.imagePath,
-    required this.label,
-    required this.sublabel,
-    required this.badgeColor,
+  const _ComparisonSlider({
+    required this.originalPath,
+    required this.compressedPath,
+    required this.value,
+    required this.onChanged,
+    required this.originalSize,
+    required this.compressedSize,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Stack(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.file(
-                File(imagePath),
-                height: 140,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stack) => Container(
-                  height: 140,
-                  color: AppTheme.surface,
-                  child: Icon(Icons.broken_image_outlined,
-                      color: AppColors.textSecondary, size: 40),
-                ),
+    return Container(
+      height: 250,
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 15,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: GestureDetector(
+          onPanUpdate: (details) {
+            final double renderWidth = context.size?.width ?? 300;
+            final double newValue = (details.localPosition.dx / renderWidth)
+                .clamp(0.0, 1.0);
+            onChanged(newValue);
+          },
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Image.file(File(compressedPath), fit: BoxFit.cover),
               ),
-            ),
-            Positioned(
-              top: 6,
-              left: 6,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: badgeColor.withValues(alpha: 0.9),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
+              Positioned.fill(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: value,
+                    child: ClipRect(
+                      child: Image.file(
+                        File(originalPath),
+                        fit: BoxFit.cover,
+                        alignment: Alignment.centerLeft,
+                        width: double.infinity,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          sublabel,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: AppColors.textSecondary,
-                fontWeight: FontWeight.w500,
+              Positioned(
+                top: 0,
+                bottom: 0,
+                left: MediaQuery.of(context).size.width * value - 20,
+                child: Container(
+                  width: 2,
+                  color: Colors.white,
+                  child: Center(
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.3),
+                            blurRadius: 10,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.unfold_more_rounded,
+                        color: AppColors.primary,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                ),
               ),
+              Positioned(
+                top: 12,
+                left: 12,
+                child: _buildBadge('ASLI', originalSize, Colors.blue),
+              ),
+              Positioned(
+                top: 12,
+                right: 12,
+                child: _buildBadge(
+                  'KOMPRESI',
+                  compressedSize,
+                  AppTheme.brandSecond,
+                ),
+              ),
+            ],
+          ),
         ),
-      ],
+      ),
+    );
+  }
+
+  Widget _buildBadge(String label, String size, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            size,
+            style: const TextStyle(color: Colors.white70, fontSize: 9),
+          ),
+        ],
+      ),
     );
   }
 }

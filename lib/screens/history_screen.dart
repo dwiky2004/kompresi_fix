@@ -15,11 +15,13 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<HistoryProvider>().loadHistory();
     });
@@ -30,9 +32,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
     });
   }
 
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      context.read<HistoryProvider>().loadMoreHistory();
+    }
+  }
+
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -40,7 +50,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Riwayat Kompresi', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Riwayat Kompresi',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
       ),
       body: Column(
         children: [
@@ -50,7 +63,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
               controller: _searchController,
               decoration: InputDecoration(
                 hintText: 'Cari nama file...',
-                prefixIcon: const Icon(Icons.search, color: AppTheme.textSecondary),
+                prefixIcon: const Icon(
+                  Icons.search,
+                  color: AppTheme.textSecondary,
+                ),
                 filled: true,
                 fillColor: AppTheme.contentCard,
                 border: OutlineInputBorder(
@@ -63,13 +79,16 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
                 ),
                 contentPadding: const EdgeInsets.symmetric(vertical: 0),
               ),
             ),
           ),
-          
+
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Row(
@@ -79,7 +98,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 _buildFilterChip('Terbaru', false),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(Icons.delete_outline, color: AppTheme.textMain),
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    color: AppTheme.textMain,
+                  ),
                   onPressed: () {
                     context.read<HistoryProvider>().clearAll();
                   },
@@ -87,12 +109,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
               ],
             ),
           ),
-          
-          Consumer<HistoryProvider>(
-            builder: (context, history, _) {
-              final total = history.items.length;
-              final averagePsnr = history.averagePsnr;
-              final averageEfficiency = history.averageCompressionRatio;
+
+          Selector<HistoryProvider, Map<String, dynamic>>(
+            selector: (_, history) => {
+              'total': history.items.length,
+              'averagePsnr': history.averagePsnr,
+              'averageEfficiency': history.averageCompressionRatio,
+            },
+            builder: (context, data, _) {
+              final total = data['total'];
+              final averagePsnr = data['averagePsnr'];
+              final averageEfficiency = data['averageEfficiency'];
 
               return Padding(
                 padding: const EdgeInsets.all(16.0),
@@ -101,8 +128,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   decoration: BoxDecoration(
                     color: AppTheme.surface,
                     borderRadius: BorderRadius.circular(12),
-                    border:
-                        Border.all(color: AppTheme.primary.withOpacity(0.1)),
+                    border: Border.all(
+                      color: AppTheme.primary.withValues(alpha: 0.1),
+                    ),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -125,18 +153,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
               );
             },
           ),
-          
+
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16.0,
+              vertical: 8.0,
+            ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Daftar Aktivitas', style: Theme.of(context).textTheme.titleMedium),
-                Text('URUT: TERBARU', style: Theme.of(context).textTheme.labelSmall),
+                Text(
+                  'Daftar Aktivitas',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                Text(
+                  'URUT: TERBARU',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
               ],
             ),
           ),
-          
+
           Expanded(
             child: Consumer<HistoryProvider>(
               builder: (context, history, _) {
@@ -160,9 +197,21 @@ class _HistoryScreenState extends State<HistoryScreen> {
                 }
 
                 return ListView.builder(
+                  controller: _scrollController,
                   padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  itemCount: items.length,
+                  itemCount: items.length + (history.hasMore ? 1 : 0),
                   itemBuilder: (context, index) {
+                    if (index == items.length) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20.0),
+                        child: Center(
+                          child: history.isLoading
+                              ? const CircularProgressIndicator(strokeWidth: 2)
+                              : const SizedBox.shrink(),
+                        ),
+                      );
+                    }
+
                     final item = items[index];
                     final status = item.statusLabel;
 
@@ -171,8 +220,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       child: Card(
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
-                          side:
-                              BorderSide(color: AppTheme.surface, width: 1.5),
+                          side: BorderSide(color: AppTheme.surface, width: 1.5),
                         ),
                         child: Padding(
                           padding: const EdgeInsets.all(12.0),
@@ -186,7 +234,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                   shape: BoxShape.circle,
                                 ),
                                 clipBehavior: Clip.antiAlias,
-                                child: item.compressedPath.isNotEmpty &&
+                                child:
+                                    item.compressedPath.isNotEmpty &&
                                         File(item.compressedPath).existsSync()
                                     ? Image.file(
                                         File(item.compressedPath),
@@ -231,9 +280,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                         const SizedBox(width: 4),
                                         Text(
                                           item.formattedDate,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .labelSmall,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.labelSmall,
                                         ),
                                       ],
                                     ),
@@ -291,7 +340,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               },
             ),
           ),
-          
+
           // Tips Card
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -312,27 +361,25 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       children: [
                         Text(
                           'Tips Analisis',
-                          style:
-                              Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textMain,
-                                  ),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textMain,
+                              ),
                         ),
                         const SizedBox(height: 4),
-                          Text(
-                            'PSNR di atas 30 dB umumnya dianggap memiliki kualitas yang baik dan tidak terlihat perbedaannya oleh mata manusia.',
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: AppTheme.textSecondary,
-                                    ),
-                          ),
+                        Text(
+                          'PSNR di atas 30 dB umumnya dianggap memiliki kualitas yang baik dan tidak terlihat perbedaannya oleh mata manusia.',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: AppTheme.textSecondary),
+                        ),
                       ],
                     ),
                   ),
                 ],
               ),
             ),
-          )
+          ),
         ],
       ),
     );
@@ -342,9 +389,13 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: isSelected ? AppTheme.primary.withOpacity(0.2) : AppTheme.contentCard,
+        color: isSelected
+            ? AppTheme.primary.withValues(alpha: 0.2)
+            : AppTheme.contentCard,
         border: Border.all(
-          color: isSelected ? AppTheme.primary.withOpacity(0.5) : AppTheme.surface,
+          color: isSelected
+              ? AppTheme.primary.withValues(alpha: 0.5)
+              : AppTheme.surface,
         ),
         borderRadius: BorderRadius.circular(20),
       ),
@@ -358,7 +409,11 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Widget _buildStatColumn(String label, String value, {bool isPrimary = false}) {
+  Widget _buildStatColumn(
+    String label,
+    String value, {
+    bool isPrimary = false,
+  }) {
     return Column(
       children: [
         Text(
@@ -387,26 +442,26 @@ class _HistoryScreenState extends State<HistoryScreen> {
     return Container(
       height: 30,
       width: 1,
-      color: AppTheme.textSecondary.withOpacity(0.2),
+      color: AppTheme.textSecondary.withValues(alpha: 0.2),
     );
   }
 
   Widget _buildStatusBadge(String status) {
     Color bgColor;
     Color textColor;
-    
+
     switch (status.toLowerCase()) {
       case 'excellent':
-        bgColor = AppTheme.success.withOpacity(0.1);
+        bgColor = AppTheme.success.withValues(alpha: 0.1);
         textColor = AppTheme.success;
         break;
       case 'good':
-        bgColor = AppTheme.primary.withOpacity(0.1);
+        bgColor = AppTheme.primary.withValues(alpha: 0.1);
         textColor = AppTheme.primary;
         break;
       case 'fair':
       default:
-        bgColor = AppTheme.destructive.withOpacity(0.1);
+        bgColor = AppTheme.destructive.withValues(alpha: 0.1);
         textColor = AppTheme.destructive;
         break;
     }
@@ -416,7 +471,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: textColor.withOpacity(0.3)),
+        border: Border.all(color: textColor.withValues(alpha: 0.3)),
       ),
       child: Text(
         status,

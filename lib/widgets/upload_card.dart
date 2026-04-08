@@ -59,22 +59,21 @@ class UploadCard extends StatelessWidget {
               const SizedBox(height: 16),
               Text(
                 'Ketuk untuk mengunggah citra',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 4),
               Text(
                 'Format didukung: JPG, PNG',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
               ),
             ] else ...[
               imagePreview ??
                   ClipRRect(
-                    borderRadius:
-                        BorderRadius.circular(AppTheme.borderRadius),
+                    borderRadius: BorderRadius.circular(AppTheme.borderRadius),
                     child: Image.file(
                       File(selectedImagePath!),
                       height: 180,
@@ -89,4 +88,3 @@ class UploadCard extends StatelessWidget {
     );
   }
 }
-

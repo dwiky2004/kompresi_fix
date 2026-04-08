@@ -3,10 +3,13 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../core/theme/theme.dart';
 import '../widgets/stat_card.dart';
 import '../widgets/upload_card.dart';
 import '../widgets/custom_button.dart';
+import 'package:provider/provider.dart';
+import '../providers/history_provider.dart';
 import 'compression_config_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -31,23 +34,28 @@ class _HomeScreenState extends State<HomeScreen> {
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined),
                 title: const Text('Pilih dari Galeri'),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(context);
-                  _pickFromGallery();
+                  if (await _requestPermission(Permission.photos) ||
+                      await _requestPermission(Permission.storage)) {
+                    _pickFromGallery();
+                  }
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.photo_camera_outlined),
                 title: const Text('Ambil Foto (Kamera)'),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(context);
-                  _pickFromCamera();
+                  if (await _requestPermission(Permission.camera)) {
+                    _pickFromCamera();
+                  }
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.insert_drive_file_outlined),
                 title: const Text('Pilih File (Manajer Berkas)'),
-                onTap: () {
+                onTap: () async {
                   Navigator.pop(context);
                   _pickFromFileManager();
                 },
@@ -59,15 +67,84 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<bool> _requestPermission(Permission permission) async {
+    final status = await permission.request();
+    if (status.isGranted) return true;
+
+    if (!mounted) return false;
+
+    if (status.isPermanentlyDenied) {
+      _showPermissionDeniedDialog(permission);
+      return false;
+    }
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Izin ditolak oleh sistem.')));
+    return false;
+  }
+
+  void _showPermissionDeniedDialog(Permission permission) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Akses Diperlukan'),
+        content: Text(
+          'Aplikasi memerlukan izin untuk mengakses ${permission.toString().split('.').last} agar dapat memproses citra. Silakan aktifkan di Pengaturan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              openAppSettings();
+            },
+            child: const Text('Buka Pengaturan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  bool _validateFileSize(String path) {
+    final file = File(path);
+    final sizeInMB = file.lengthSync() / (1024 * 1024);
+    if (sizeInMB > 10) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('File Terlalu Besar'),
+          content: Text(
+            'Ukuran citra (${sizeInMB.toStringAsFixed(1)} MB) melebihi batas maksimal 10 MB untuk mencegah kehabisan memori.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Mengerti'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
   Future<void> _pickFromGallery() async {
     try {
       debugPrint('HomeScreen – pickFromGallery()');
       final picker = ImagePicker();
-      final XFile? image =
-          await picker.pickImage(source: ImageSource.gallery);
+      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
 
-      if (image != null && mounted) {
+      if (!mounted) return;
+      if (image == null) return;
+
+      if (_validateFileSize(image.path)) {
         setState(() {
+          _evictSelectedImage(_selectedImagePath);
           _selectedImagePath = image.path;
         });
         debugPrint('HomeScreen – gallery path: ${image.path}');
@@ -85,11 +162,14 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       debugPrint('HomeScreen – pickFromCamera()');
       final picker = ImagePicker();
-      final XFile? image =
-          await picker.pickImage(source: ImageSource.camera);
+      final XFile? image = await picker.pickImage(source: ImageSource.camera);
 
-      if (image != null && mounted) {
+      if (!mounted) return;
+      if (image == null) return;
+
+      if (_validateFileSize(image.path)) {
         setState(() {
+          _evictSelectedImage(_selectedImagePath);
           _selectedImagePath = image.path;
         });
         debugPrint('HomeScreen – camera path: ${image.path}');
@@ -111,18 +191,29 @@ class _HomeScreenState extends State<HomeScreen> {
       );
 
       final path = result?.files.single.path;
-      if (path != null && mounted) {
-        setState(() {
-          _selectedImagePath = path;
-        });
-        debugPrint('HomeScreen – file manager path: $path');
+      if (!mounted) return;
+      if (path != null) {
+        if (_validateFileSize(path)) {
+          setState(() {
+            _evictSelectedImage(_selectedImagePath);
+            _selectedImagePath = path;
+          });
+          debugPrint('HomeScreen – file manager path: $path');
+        }
       }
     } catch (e, st) {
       debugPrint('HomeScreen – file picker error: $e\n$st');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal memilih file gambar: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Gagal memilih file gambar: $e')));
+    }
+  }
+
+  void _evictSelectedImage(String? path) {
+    if (path != null) {
+      debugPrint('HomeScreen – evicting image from cache: $path');
+      FileImage(File(path)).evict();
     }
   }
 
@@ -131,14 +222,19 @@ class _HomeScreenState extends State<HomeScreen> {
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => CompressionConfigScreen(
-            imagePath: _selectedImagePath!,
-          ),
+          builder: (context) =>
+              CompressionConfigScreen(imagePath: _selectedImagePath!),
         ),
       );
     } else {
       _showImageSourceSheet();
     }
+  }
+
+  @override
+  void dispose() {
+    _evictSelectedImage(_selectedImagePath);
+    super.dispose();
   }
 
   @override
@@ -154,34 +250,42 @@ class _HomeScreenState extends State<HomeScreen> {
               Text(
                 'Halo, Peneliti!',
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
                 'Siap untuk melakukan analisis kompresi citra digital hari ini?',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary,
-                    ),
+                  color: AppColors.textSecondary,
+                ),
               ),
               const SizedBox(height: 24),
-              Row(
-                children: [
-                  StatCard(
-                    title: 'TOTAL PROSES',
-                    value: '24',
-                    icon: Icons.folder_outlined,
-                    accentColor: AppColors.primary,
-                  ),
-                  const SizedBox(width: 12),
-                  StatCard(
-                    title: 'RATA RATA EFISIENSI',
-                    value: '88%',
-                    icon: Icons.trending_up,
-                    accentColor: AppColors.secondary,
-                  ),
-                ],
+              Selector<HistoryProvider, Map<String, dynamic>>(
+                selector: (_, history) => {
+                  'total': history.items.length,
+                  'efficiency': history.averageCompressionRatio,
+                },
+                builder: (context, data, _) {
+                  return Row(
+                    children: [
+                      StatCard(
+                        title: 'TOTAL PROSES',
+                        value: '${data['total']}',
+                        icon: Icons.folder_outlined,
+                        accentColor: AppColors.primary,
+                      ),
+                      const SizedBox(width: 12),
+                      StatCard(
+                        title: 'RATA EFISIENSI',
+                        value: '${data['efficiency'].toStringAsFixed(0)}%',
+                        icon: Icons.trending_up,
+                        accentColor: AppColors.secondary,
+                      ),
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 24),
               Text(
@@ -196,8 +300,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     ? Column(
                         children: [
                           ClipRRect(
-                            borderRadius:
-                                BorderRadius.circular(AppTheme.borderRadius),
+                            borderRadius: BorderRadius.circular(
+                              AppTheme.borderRadius,
+                            ),
                             child: Image.file(
                               File(_selectedImagePath!),
                               height: 180,
@@ -208,16 +313,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           const SizedBox(height: 16),
                           Text(
                             'Ketuk untuk mengganti gambar',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
+                            style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(color: AppColors.primary),
                           ),
                           const SizedBox(height: 12),
                           OutlinedButton.icon(
                             onPressed: _showImageSourceSheet,
-                            icon: const Icon(Icons.photo_library_outlined,
-                                size: 20),
+                            icon: const Icon(
+                              Icons.photo_library_outlined,
+                              size: 20,
+                            ),
                             label: const Text('Pilih Dari Galeri'),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppColors.primary,
@@ -298,15 +403,12 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 Text(
                   title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontSize: 16,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleMedium?.copyWith(fontSize: 16),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  description,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                Text(description, style: Theme.of(context).textTheme.bodySmall),
               ],
             ),
           ),

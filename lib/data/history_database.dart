@@ -1,3 +1,10 @@
+/// SECURITY ADVISORY:
+/// Aplikasi ini menyimpan lokalisasi file asli dan hasil kompresi di dalam database SQLite.
+/// Jika citra yang diproses mengandung data sensitif (PII/Copyrighted), disarankan
+/// untuk mengupgrade implementasi ini menggunakan package 'sqflite_sqlcipher'
+/// guna mendukung enkripsi database (AES-256).
+library;
+
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -39,7 +46,7 @@ class HistoryRecord {
 
   String get formattedDate {
     final local = createdAt.toLocal();
-    final twoDigits = (int v) => v.toString().padLeft(2, '0');
+    String twoDigits(int v) => v.toString().padLeft(2, '0');
     final day = twoDigits(local.day);
     final month = twoDigits(local.month);
     final hour = twoDigits(local.hour);
@@ -102,7 +109,7 @@ class HistoryDatabase {
 
       _db = await openDatabase(
         path,
-        version: 1,
+        version: 2,
         onCreate: (db, version) async {
           debugPrint('HistoryDatabase.database – creating table $_tableName');
           await db.execute('''
@@ -118,6 +125,15 @@ class HistoryDatabase {
             created_at TEXT NOT NULL
           )
         ''');
+          // Initial indexing
+          await _createIndexes(db);
+        },
+        onUpgrade: (db, oldVersion, newVersion) async {
+          debugPrint(
+              'HistoryDatabase.database – upgrading from $oldVersion to $newVersion');
+          if (oldVersion < 2) {
+            await _createIndexes(db);
+          }
         },
       );
 
@@ -132,21 +148,39 @@ class HistoryDatabase {
   Future<int> insertRecord(HistoryRecord record) async {
     final db = await database;
     debugPrint('HistoryDatabase.insertRecord – inserting ${record.fileName}');
-    return db.insert(
-      _tableName,
-      record.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+
+    // Menggunakan transaction untuk batch performa dan integritas data
+    return await db.transaction((txn) async {
+      return await txn.insert(
+        _tableName,
+        record.toMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    });
   }
 
-  Future<List<HistoryRecord>> fetchAllRecords() async {
+  Future<List<HistoryRecord>> fetchAllRecords({
+    int? limit,
+    int? offset,
+  }) async {
     final db = await database;
     final maps = await db.query(
       _tableName,
       orderBy: 'datetime(created_at) DESC',
+      limit: limit,
+      offset: offset,
     );
-    debugPrint('HistoryDatabase.fetchAllRecords – fetched ${maps.length} rows');
+    debugPrint(
+        'HistoryDatabase.fetchAllRecords – fetched ${maps.length} rows (limit: $limit, offset: $offset)');
     return maps.map((row) => HistoryRecord.fromMap(row)).toList();
+  }
+
+  Future<void> _createIndexes(Database db) async {
+    debugPrint('HistoryDatabase._createIndexes – creating indexes for performance');
+    // Index pada tanggal untuk pengurutan/query cepat
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_history_date ON $_tableName(created_at)');
+    // Index pada path asli untuk pencarian masa depan
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_history_path ON $_tableName(original_path)');
   }
 
   Future<void> clearAll() async {

@@ -32,10 +32,7 @@ class _MainScreenState extends State<MainScreen> {
             ),
             child: Align(
               alignment: Alignment.topCenter,
-              child: IndexedStack(
-                index: _currentIndex,
-                children: _screens,
-              ),
+              child: IndexedStack(index: _currentIndex, children: _screens),
             ),
           ),
           bottomNavigationBar: BottomNavigationBar(

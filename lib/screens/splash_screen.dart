@@ -24,9 +24,10 @@ class _SplashScreenState extends State<SplashScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
-    );
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeIn));
     _controller.forward();
 
     Timer(const Duration(seconds: 3), () {
@@ -61,28 +62,24 @@ class _SplashScreenState extends State<SplashScreen>
                   color: AppColors.primary.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
-                  Icons.bolt,
-                  size: 64,
-                  color: AppColors.primary,
-                ),
+                child: Icon(Icons.bolt, size: 64, color: AppColors.primary),
               ),
               const SizedBox(height: 32),
               Text(
                 AppConstants.appName,
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
               Text(
                 AppConstants.appSubtitle,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: AppColors.textSecondary,
-                      fontSize: 14,
-                    ),
+                  color: AppColors.textSecondary,
+                  fontSize: 14,
+                ),
                 textAlign: TextAlign.center,
               ),
             ],
